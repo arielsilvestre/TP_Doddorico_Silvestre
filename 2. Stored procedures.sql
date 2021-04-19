@@ -78,3 +78,17 @@ BEGIN
   		END if;						
 END
 $$
+
+
+-- IMPLEMENTAMOS UN TRIGGER PARA EVITAR QUE SE MODIFIQUEN LAS HORAS LIQUIDADAS DE UN PROYECTO
+delimiter $$
+DROP TRIGGER if EXISTS no_modificar_horas;
+CREATE TRIGGER no_modificar_horas
+	BEFORE UPDATE
+	ON liquidacion FOR EACH ROW
+BEGIN
+	IF OLD.cantidad_horas != NEW.cantidad_horas then
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Las horas ya liquidadas no pueden ser modificadas.';
+	END IF;
+END;
+$$
