@@ -41,16 +41,11 @@ $$
 
 delimiter $$
 DROP PROCEDURE if EXISTS CalcularLiquidacionMensual;
-CREATE PROCEDURE CalcularLiquidacionMensual(IN id_rol_aux INT, IN id_proy_clm INT, IN id_cliente_aux INT, IN anio_clm INT, IN mes_clm INT)
+CREATE PROCEDURE CalcularLiquidacionMensual(IN id_rol_aux INT, IN id_proy_clm INT, IN id_cliente_aux INT, IN fecha_liq_aux DATE)
 
 BEGIN	
 	DECLARE horas_rendidas INT DEFAULT 0;
-	DECLARE horas_liquidadas INT DEFAULT 0;
-	DECLARE horas_acumuladas INT DEFAULT 0;
-		
-	-- SUMO HORAS DEL PROYECTO PASADO COMO PARÁMETRO
-	SET horas_rendidas = (SELECT SUM(ah.cantidad_horas) 
-							FROM asignacion_horas as ah 
+	SET horas_rendidas = (SELECT SUM(ah.cantidad_horas) FROM asignacion_horas ah 
 	                        INNER JOIN proyecto p ON p.id_proyecto = ah.id_proyecto
 									   WHERE ah.id_proyecto = id_proy_clm);
 				
@@ -58,27 +53,16 @@ BEGIN
 	   then 
          SET horas_rendidas = 0;
 	END if;
-								
-	-- ME FIJO SI YA HAY HORAS LIQUIDADAS PARA ESTE PROYECTO
-	SET horas_liquidadas = (SELECT SUM(l.cantidad_horas) FROM liquidacion l 
-										WHERE (l.id_proy = id_proy_clm AND l.anio_liq = anio_clm AND l.mes_liq = mes_clm AND l.id_rol = id_rol_aux)
-									);
-		
-	if horas_liquidadas IS NULL 
-	   then 
-			SET horas_liquidadas = 0;
-	END if; 
-	
-	SET horas_acumuladas =  horas_rendidas - horas_liquidadas;
-  		If horas_acumuladas > 0 then
-			INSERT INTO liquidacion (id_rol, id_proy, id_cliente, cantidad_horas, mes_liq, anio_liq) 
-				VALUES (id_rol_aux, id_proy_clm, id_cliente_aux, horas_acumuladas, mes_clm, anio_clm);
+
+
+  	If horas_rendidas > 0 
+	  then
+			INSERT INTO liquidacion (id_rol, id_proy, id_cliente, cantidad_horas, fecha_liq) 
+				VALUES (id_rol_aux, id_proy_clm, id_cliente_aux, horas_rendidas, fecha_liq_aux);
 			SET horas_rendidas = 0;
-  	 		SET horas_acumuladas = 0;
-  		END if;						
+  	END if;						
 END
 $$
-
 
 -- IMPLEMENTAMOS UN TRIGGER PARA EVITAR QUE SE MODIFIQUEN LAS HORAS LIQUIDADAS DE UN PROYECTO
 delimiter $$
@@ -89,6 +73,30 @@ CREATE TRIGGER no_modificar_horas
 BEGIN
 	IF OLD.cantidad_horas != NEW.cantidad_horas then
 		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Las horas ya liquidadas no pueden ser modificadas.';
+	END IF;
+END;
+$$
+
+-- IMPLEMENTAMOS UN TRIGGER PARA EVITAR QUE SE MODIFIQUEN LAS HORAS ASIGNADAS YA LIQUIDADAS
+delimiter $$
+DROP TRIGGER if EXISTS no_modificar_horas_asignadas;
+CREATE TRIGGER no_modificar_horas_asignadas
+	BEFORE UPDATE
+	ON asignacion_horas FOR EACH ROW
+BEGIN
+	IF OLD.cantidad_horas != NEW.cantidad_horas 
+	then
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Las horas asignadas ya liquidadas no pueden ser modificadas.';
+	END IF;
+	
+	IF (SELECT ah.fecha_ah FROM asignacion_horas ah) < (SELECT l.fecha_liq FROM liquidacion l)
+	then
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Las horas asignadas ya liquidadas no pueden ser modificadas.';
+	END IF;
+	 
+	IF (SELECT l.id_proy FROM liquidacion l) = (SELECT ah.id_proyecto FROM asignacion_horas ah)
+	then
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: Las horas asignadas ya liquidadas no pueden ser modificadas.';
 	END IF;
 END;
 $$
